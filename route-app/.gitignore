@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.db
+venv/
+env/
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Flask instance
+backend/instance/
+
+# Docker
+pgdata/
+*.log
+
+# Секреты
+.env
+*.pem
