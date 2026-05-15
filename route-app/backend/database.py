@@ -24,6 +24,16 @@ class Route(db.Model):
     places     = db.Column(db.Text, nullable=False)  # JSON
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+class FavoritePlace(db.Model):
+    __tablename__ = 'favorite_places'
+    id         = db.Column(db.Integer, primary_key=True)
+    user_id    = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    name       = db.Column(db.String(200), nullable=False)
+    lat        = db.Column(db.Float, nullable=False)
+    lon        = db.Column(db.Float, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship('User', backref='favorite_places', lazy='select')
 
 def init_db(app):
     db.init_app(app)
