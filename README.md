@@ -97,11 +97,3 @@ docker-compose up --build
 | PUT    | /api/routes/:id        | Переименовать маршрут       |
 | DELETE | /api/routes/:id        | Удалить маршрут             |
 ```
-
-После обновления сделайте:
-
-```bash
-git add README.md
-git commit -m "Обновлён README: структура, возможности, все эндпоинты"
-git push
-```
