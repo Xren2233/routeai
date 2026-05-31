@@ -17,7 +17,7 @@ function loadYandexMaps(callback) {
   if (window.ymaps) { ymaps.ready(callback); return; }
   const script = document.createElement('script');
   // TODO: вставить свой API-ключ
-  script.src = 'https://api-maps.yandex.ru/2.1/?apikey=YOUR_YANDEX_MAPS_KEY&lang=ru_RU';
+  script.src = 'https://api-maps.yandex.ru/2.1/?apikey=43603592-480f-4007-b8f4-c328a96e580b&lang=ru_RU';
   script.onload = () => ymaps.ready(callback);
   document.head.appendChild(script);
 }
