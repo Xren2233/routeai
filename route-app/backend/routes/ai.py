@@ -1,16 +1,12 @@
 from flask import Blueprint, request, jsonify
 import requests, os, json, uuid, re, math, time
-import urllib3
-from routes.geo import geocode_start, search_pois, is_place_open_at_time
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+from routes.geo import geocode_start, search_pois, is_place_open_at_time, build_route_osrm
 
 ai_bp = Blueprint('ai', __name__)
 GIGACHAT_AUTH_URL = 'https://ngw.devices.sberbank.ru:9443/api/v2/oauth'
 GIGACHAT_API_URL  = 'https://gigachat.devices.sberbank.ru/api/v1/chat/completions'
 YANDEX_GPT_URL    = 'https://llm.api.cloud.yandex.net/foundationModels/v1/completion'
 
-
-# ── YandexGPT ─────────────────────────────────────────────────────────────
 
 def call_yandexgpt(prompt):
     api_key  = os.getenv('YANDEX_GPT_KEY')
@@ -33,7 +29,7 @@ def get_gigachat_token():
     r = requests.post(GIGACHAT_AUTH_URL,
         headers={'Authorization': f'Basic {creds}', 'RqUID': str(uuid.uuid4()),
                  'Content-Type': 'application/x-www-form-urlencoded'},
-        data={'scope': 'GIGACHAT_API_PERS'}, verify=False, timeout=15)
+        data={'scope': 'GIGACHAT_API_PERS'}, timeout=15)
     r.raise_for_status()
     return r.json()['access_token']
 
@@ -44,7 +40,7 @@ def call_gigachat(prompt):
         headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'},
         json={'model': 'GigaChat', 'messages': [{'role': 'user', 'content': prompt}],
               'temperature': 0.5, 'max_tokens': 1500},
-        verify=False, timeout=30)
+        timeout=30)
     r.raise_for_status()
     return r.json()['choices'][0]['message']['content']
 
@@ -66,7 +62,6 @@ def parse_json_response(content):
     content = re.sub(r'```json\s*', '', content)
     content = re.sub(r'```\s*', '', content).strip()
 
-    # Попытка 1: прямой парсинг
     try:
         return json.loads(content)
     except Exception:
@@ -80,9 +75,7 @@ def parse_json_response(content):
         except Exception:
             pass
 
-    # Попытка 3: JSON обрезан — закрываем незакрытые скобки
     fixed = content.rstrip().rstrip(',')
-    # Считаем незакрытые [ и {
     open_sq = fixed.count('[') - fixed.count(']')
     open_cu = fixed.count('{') - fixed.count('}')
     fixed += ']' * max(open_sq, 0) + '}' * max(open_cu, 0)
@@ -162,69 +155,42 @@ def calc_radius(data):
 
 def build_meta(data, actual_m=None):
     t = {'walk': 'Пешком', 'bike': 'Велосипед', 'mixed': 'Смешанный'}
-    transport = data.get('transport', 'walk')
-    
     if actual_m and actual_m > 0:
         km_str = f"{actual_m/1000:.1f} км"
-        
-        # Вычисляем реальное время
-        if transport == 'bike':
-            speed_kmh = 12  # средняя скорость велосипеда
-        elif transport == 'mixed':
-            speed_kmh = 8
-        else:
-            speed_kmh = 4  # средняя скорость пешехода
-        
-        # Учитываем интенсивность
-        intensity = data.get('intensity', 'chill')
-        if intensity == 'sport':
-            speed_kmh *= 1.5
-        elif intensity == 'active':
-            speed_kmh *= 1.2
-        
-        # Добавляем время на остановки (по 10 мин на точку)
-        stops_minutes = data.get('_points_count', 3) * 10 / 60  # в часах
-        
-        hours = actual_m / 1000 / speed_kmh + stops_minutes
-        hours_str = f"{hours:.1f} ч"
     else:
         km_str = f"{data.get('distance','3-5')} км"
-        hours_str = f"{data.get('duration',2)} ч"
-    
-    return f"{hours_str} · {km_str} · {t.get(transport,'Пешком')}"
+    return f"{data.get('duration',2)} ч · {km_str} · {t.get(data.get('transport','walk'),'Пешком')}"
 
 
-def select_route_points(pois, slat, slon, wanted, target_km, interests=None):
-    """
-    Алгоритм выбора точек маршрута:
-    1. По одной точке на каждую выбранную категорию (не повторяем)
-    2. Если км не набрано — добавляем бонусные комфортные точки по пути (парки, скверы)
-    3. Не возвращаемся в уже посещённые зоны (радиус 300м)
-    """
+def select_route_points(pois, slat, slon, wanted, target_km, interests=None, accessibility='none'):
     if not pois:
         return [], 0.0
 
     target_m   = target_km * 1000
     tolerance  = 1000
-    COMFORT    = {'park', 'garden', 'nature_reserve', 'viewpoint', 'square'}
 
-    # Разбиваем POI по типам
     by_type = {}
     for p in pois:
         t = p.get('type', 'other')
+        if accessibility in ('stroller', 'limited'):
+            if p.get('wheelchair') == 'no':
+                continue
+            if p.get('highway') == 'steps':
+                continue
         by_type.setdefault(t, []).append(p)
 
     selected   = []
-    used_ids   = set()
-    used_zones = []   # список (lat, lon) уже посещённых мест — не ходим рядом
+    used_names = set()      # По названиям
+    used_zones = []         # По координатам
     cur_lat, cur_lon, total = slat, slon, 0.0
 
-    def too_close_to_visited(lat, lon):
+    def too_close(lat, lon):
         return any(haversine(lat, lon, z[0], z[1]) < 300 for z in used_zones)
 
     def best_in_type(type_key, cur_lat, cur_lon, remaining):
         candidates = [p for p in by_type.get(type_key, [])
-                      if id(p) not in used_ids]
+                      if p['name'] not in used_names
+                      and not too_close(p['lat'], p['lon'])]
         valid = [(haversine(cur_lat, cur_lon, p['lat'], p['lon']), p)
                  for p in candidates
                  if haversine(cur_lat, cur_lon, p['lat'], p['lon']) <= remaining + tolerance]
@@ -233,8 +199,7 @@ def select_route_points(pois, slat, slon, wanted, target_km, interests=None):
         valid.sort(key=lambda x: x[0])
         return valid[0][1], valid[0][0]
 
-    # Шаг 1: по одной точке на каждый нужный тип
-    # Сортируем типы по близости первой доступной точки
+    # Шаг 1: по одной точке на каждый ВЫБРАННЫЙ тип
     type_order = []
     for t in set(wanted):
         best, d = best_in_type(t, cur_lat, cur_lon, target_m - total)
@@ -249,46 +214,41 @@ def select_route_points(pois, slat, slon, wanted, target_km, interests=None):
         poi, dist = best_in_type(t, cur_lat, cur_lon, remaining)
         if not poi:
             continue
-        used_ids.add(id(poi))
+        used_names.add(poi['name'])
         used_zones.append((poi['lat'], poi['lon']))
         selected.append(poi)
         total += dist
         cur_lat, cur_lon = poi['lat'], poi['lon']
-        print(f"[ROUTE] [{t}] +{dist/1000:.2f}км {poi['name']} | {total/1000:.2f}/{target_km}км")
+        print(f"[ROUTE] [{t}] +{dist/1000:.2f}км {poi['name']}")
 
-    # Шаг 2: если км не набрано — добавляем комфортные точки по пути
+    # Шаг 2: добираем другие места, НЕ повторяя названия
     if total < target_m - tolerance:
-        comfort_pois = [p for p in pois
-                        if p.get('type') in COMFORT
-                        and id(p) not in used_ids
-                        and not too_close_to_visited(p['lat'], p['lon'])]
         for _ in range(5):
             remaining = target_m - total
             if remaining <= tolerance:
                 break
-            valid = [(haversine(cur_lat, cur_lon, p['lat'], p['lon']), p)
-                     for p in comfort_pois
-                     if id(p) not in used_ids
-                     and haversine(cur_lat, cur_lon, p['lat'], p['lon']) <= remaining + tolerance
-                     and not too_close_to_visited(p['lat'], p['lon'])]
-            if not valid:
+            best = None
+            best_dist = float('inf')
+            for p in pois:
+                if p['name'] in used_names:
+                    continue
+                if too_close(p['lat'], p['lon']):
+                    continue
+                d = haversine(cur_lat, cur_lon, p['lat'], p['lon'])
+                if d <= remaining + tolerance and d < best_dist:
+                    best_dist = d
+                    best = p
+            if not best:
                 break
-            valid.sort(key=lambda x: x[0])
-            dist, poi = valid[0]
-            used_ids.add(id(poi))
-            used_zones.append((poi['lat'], poi['lon']))
-            selected.append(poi)
-            total += dist
-            cur_lat, cur_lon = poi['lat'], poi['lon']
-            print(f"[ROUTE] [comfort] +{dist/1000:.2f}км {poi['name']} | {total/1000:.2f}/{target_km}км")
+            used_names.add(best['name'])
+            used_zones.append((best['lat'], best['lon']))
+            selected.append(best)
+            total += best_dist
+            cur_lat, cur_lon = best['lat'], best['lon']
+            print(f"[ROUTE] [+{best.get('type','?')}] {best['name']} | {total/1000:.2f}км")
 
-    type_summary = {}
-    for p in selected:
-        t = p.get('type', '?')
-        type_summary[t] = type_summary.get(t, 0) + 1
-    print(f"[ROUTE] Итого: {len(selected)} точек, {total/1000:.2f}км | типы: {type_summary}")
+    print(f"[ROUTE] Итого: {len(selected)} точек, {total/1000:.2f}км")
     return selected, total
-
 
 def filter_by_distance(points, slat, slon, target_km):
     """Убирает точки слишком далеко от старта."""
@@ -442,11 +402,34 @@ def generate_via_gigachat(data, slat, slon):
         best = None  # (dist, lat, lon, name, cat_key)
 
         for cat_key, query in list(remaining_cats.items()):
-            result = find_nearest_by_category(
-                query, cur_lat, cur_lon,
-                min(remaining + 1000, target_m * 1.3),
-                used
-            )
+            # Пробуем Яндекс для поиска места
+            result = None
+            api_key = os.getenv('YANDEX_MAPS_KEY')
+            if api_key:
+                try:
+                    from routes.geo import YANDEX_SEARCH
+                    r = requests.get(YANDEX_SEARCH, params={
+                        'apikey': api_key, 'text': query, 'lang': 'ru_RU',
+                        'll': f'{cur_lon},{cur_lat}',
+                        'spn': f'{min(remaining+1000, target_m*1.3)/111000},{min(remaining+1000, target_m*1.3)/111000}',
+                        'type': 'biz', 'results': 3,
+                    }, timeout=10)
+                    for item in r.json().get('features', []):
+                        coords = item['geometry']['coordinates']
+                        lat, lon = float(coords[1]), float(coords[0])
+                        if not any(haversine(lat, lon, u[0], u[1]) < 200 for u in used):
+                            name = item['properties']['name']
+                            result = (lat, lon, name)
+                            break
+                except Exception:
+                    pass
+            
+            if not result:
+                result = find_nearest_by_category(
+                    query, cur_lat, cur_lon,
+                    min(remaining + 1000, target_m * 1.3),
+                    used
+                )
             if result:
                 lat, lon, name = result
                 dist = haversine(cur_lat, cur_lon, lat, lon)
@@ -491,8 +474,16 @@ def generate_via_gigachat(data, slat, slon):
             p['price']       = info.get('price', '')
             p['rating']      = info.get('rating')
 
-    data['_points_count'] = len(pts)
-    return jsonify({'places': pts, 'meta': build_meta(data, total)})
+    osrm_points = [{'lat': p['coords'][0], 'lon': p['coords'][1]} for p in pts if p.get('coords')]
+    route_geo = build_route_osrm(osrm_points, data.get('transport', 'walk'))
+    
+    return jsonify({
+        'places': pts,
+        'meta': build_meta(data, total),
+        'route_geometry': route_geo['geometry'] if route_geo else None,
+        'route_distance': route_geo['distance'] if route_geo else None,
+        'route_duration': route_geo['duration'] if route_geo else None,
+    })
 
 @ai_bp.get('/ping')
 def ping():
@@ -515,7 +506,11 @@ def generate_route():
         radius = calc_radius(data)
         print(f"[AI] Цель: {target_km}км, радиус: {radius}м")
         interests = data.get('categories', data.get('interests', []))
-        pois = search_pois(slat, slon, radius, interests)
+        # Пробуем Яндекс сначала, потом Overpass
+        from routes.geo import search_pois_yandex
+        pois = search_pois_yandex(slat, slon, radius, interests)
+        if pois is None:
+            pois = search_pois(slat, slon, radius, interests)
         
         # Фильтр по времени суток
         daytime = data.get('daytime', '')
@@ -554,7 +549,7 @@ def generate_route():
             wanted.extend(INTEREST_TYPES.get(i, [i]))
         if not wanted:
             wanted = DEFAULT_TYPES
-        selected, actual_m = select_route_points(pois, slat, slon, wanted, target_km, interests)
+        selected, actual_m = select_route_points(pois, slat, slon, wanted, target_km, interests, accessibility)
         print(f"[AI] Выбрано: {[p['name'] for p in selected]}")
         cats_str = ', '.join(CAT_LABELS.get(i, i) for i in interests)
         desc_map = gigachat_describe(selected, {
@@ -592,8 +587,17 @@ def generate_route():
             })
         rest = filter_by_distance(pts[1:], slat, slon, target_km)
         pts = pts[:1] + rest
-        data['_points_count'] = len(pts)
-        return jsonify({'places': pts, 'meta': build_meta(data, actual_m)})
+        # Строим реальный маршрут через OSRM
+        osrm_points = [{'lat': p['coords'][0], 'lon': p['coords'][1]} for p in pts if p.get('coords')]
+        route_geo = build_route_osrm(osrm_points, data.get('transport', 'walk'))
+        
+        return jsonify({
+            'places': pts,
+            'meta': build_meta(data, actual_m),
+            'route_geometry': route_geo['geometry'] if route_geo else None,
+            'route_distance': route_geo['distance'] if route_geo else None,
+            'route_duration': route_geo['duration'] if route_geo else None,
+        })
     except Exception as e:
         import traceback
         print(f"[ERROR]\n{traceback.format_exc()}")
