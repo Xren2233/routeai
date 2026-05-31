@@ -18,22 +18,13 @@ class User(db.Model):
 class Route(db.Model):
     __tablename__ = 'routes'
     id         = db.Column(db.Integer, primary_key=True)
-    user_id    = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    user_id    = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
     title      = db.Column(db.String(200), nullable=False)
     meta       = db.Column(db.String(200))
-    places     = db.Column(db.Text, nullable=False)  # JSON
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-
-class FavoritePlace(db.Model):
-    __tablename__ = 'favorite_places'
-    id         = db.Column(db.Integer, primary_key=True)
-    user_id    = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-    name       = db.Column(db.String(200), nullable=False)
-    lat        = db.Column(db.Float, nullable=False)
-    lon        = db.Column(db.Float, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-
-    user = db.relationship('User', backref='favorite_places', lazy='select')
+    places     = db.Column(db.Text, nullable=False)
+    note       = db.Column(db.Text, default='')
+    photos     = db.Column(db.Text, default='[]')  # JSON-массив data URL
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
 def init_db(app):
     db.init_app(app)
