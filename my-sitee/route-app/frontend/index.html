@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RouteAI — Умные маршруты</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+  <!-- Модальное окно авторизации -->
+    <!-- Модальное окно авторизации -->
+  <div id="auth-overlay" class="overlay active">
+    <div class="modal" id="auth-modal">
+      <div id="register-form">
+        <h2>Создать аккаунт</h2>
+        <input type="text" id="reg-name" placeholder="Имя" />
+        <input type="email" id="reg-email" placeholder="Почта" />
+        <input type="password" id="reg-password" placeholder="Пароль" />
+        <input type="password" id="reg-confirm" placeholder="Подтвердите пароль" />
+        <p class="error-msg" id="reg-error"></p>
+        <button class="btn-primary" onclick="register()">Зарегистрироваться</button>
+        <p class="switch-link">Уже есть аккаунт? <span onclick="showLogin()">Войти</span></p>
+        <div class="guest-divider"><span>или</span></div>
+        <button class="btn-guest" onclick="continueAsGuest()">Продолжить как гость</button>
+      </div>
+
+      <div id="login-form" class="hidden">
+        <h2>Вход</h2>
+        <input type="email" id="login-email" placeholder="Почта" />
+        <input type="password" id="login-password" placeholder="Пароль" />
+        <p class="error-msg" id="login-error"></p>
+        <button class="btn-primary" onclick="login()">Войти</button>
+        <p class="switch-link">Нет аккаунта? <span onclick="showRegister()">Создать</span></p>
+        <div class="guest-divider"><span>или</span></div>
+        <button class="btn-guest" onclick="continueAsGuest()">Продолжить как гость</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Основное приложение -->
+  <div id="app" class="hidden">
+
+    <!-- Навигационная панель -->
+    <nav class="navbar">
+      <div class="nav-links">
+        <button class="nav-btn active" onclick="showPage('home')">Главная</button>
+        <button class="nav-btn" onclick="showPage('account')">Аккаунт</button>
+        <button class="nav-btn btn-create" onclick="showPage('survey')">Создать маршрут</button>
+      </div>
+    </nav>
+
+    <!-- Главная страница -->
+    <div id="page-home" class="page active">
+      <div class="home-hero">
+        <h1>Ваш идеальный маршрут</h1>
+        <p>Нейросеть подберёт прогулку под ваши интересы, настроение и время</p>
+        <button class="btn-primary btn-large" onclick="showPage('survey')">Создать маршрут</button>
+      </div>
+
+      <!-- Пример маршрута -->
+      <div class="example-section">
+        <h3>Пример маршрута: Вечерняя Москва</h3>
+        <div class="route-card" onclick="showExampleRoute()">
+          <div class="route-card-img">🗺️</div>
+          <div class="route-card-info">
+            <strong>Романтическая прогулка</strong>
+            <span>3 часа · 6 км · 5 точек</span>
+            <p>Красная площадь → Зарядье → Крымская набережная → Парк Горького → Воробьёвы горы</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Карта с маршрутом -->
+      <div class="map-section">
+        <div id="main-map"></div>
+        <div class="points-sidebar" id="points-sidebar">
+          <h4>Точки маршрута</h4>
+          <div class="point-list" id="point-list">
+            <div class="point-item">
+              <span class="point-num">1</span>
+              <div>
+                <strong>Красная площадь</strong>
+                <p>Сердце Москвы. Кремль, Собор Василия Блаженного, ГУМ.</p>
+              </div>
+            </div>
+            <div class="point-item">
+              <span class="point-num">2</span>
+              <div>
+                <strong>Парк Зарядье</strong>
+                <p>Современный парк с видовой платформой над Москвой-рекой.</p>
+              </div>
+            </div>
+            <div class="point-item">
+              <span class="point-num">3</span>
+              <div>
+                <strong>Крымская набережная</strong>
+                <p>Пешеходная зона вдоль реки с арт-объектами.</p>
+              </div>
+            </div>
+            <div class="point-item">
+              <span class="point-num">4</span>
+              <div>
+                <strong>Парк Горького</strong>
+                <p>Культовый парк с кафе, прокатом велосипедов и летними мероприятиями.</p>
+              </div>
+            </div>
+            <div class="point-item">
+              <span class="point-num">5</span>
+              <div>
+                <strong>Воробьёвы горы</strong>
+                <p>Лучшая панорама Москвы. Смотровая площадка у МГУ.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+        <!-- Страница аккаунта -->
+    <div id="page-account" class="page">
+      <div class="account-container">
+        <div class="account-avatar">
+          <img id="avatar-img" src="" alt="Аватар" style="display:none;width:100%;height:100%;border-radius:50%;object-fit:cover;" />
+          <span id="avatar-placeholder">👤</span>
+        </div>
+        <h2 id="account-name">Имя пользователя</h2>
+        <p id="account-email">email@example.com</p>
+
+        <!-- Кнопка редактирования профиля -->
+        <button class="btn-secondary" onclick="showEditProfile()" style="margin-bottom:16px;">
+           Редактировать профиль
+        </button>
+
+        <!-- Форма редактирования профиля (скрыта) -->
+        <div id="edit-profile-form" class="hidden" style="margin-bottom:24px;">
+          <div class="edit-profile-card">
+            <h4>Изменить данные</h4>
+            <!-- Аватар в форме -->
+            <div style="text-align:center;margin-bottom:16px;">
+              <div class="edit-avatar" onclick="document.getElementById('avatar-input').click()">
+                <img id="edit-avatar-img" src="" alt="Аватар" style="display:none;width:100%;height:100%;border-radius:50%;object-fit:cover;" />
+                <span id="edit-avatar-placeholder">📷</span>
+              </div>
+              <input type="file" id="avatar-input" accept="image/*" onchange="uploadAvatar(event)" style="display:none;" />
+              <button type="button" class="btn-sm" onclick="removeAvatar()" style="margin-top:8px;font-size:0.8rem;background:transparent;border:1px solid var(--border);color:var(--text-muted);border-radius:6px;padding:4px 16px;cursor:pointer;">
+                Удалить фото
+              </button>
+            </div>
+
+            <input type="text" id="edit-name" class="survey-input" placeholder="Новое имя" />
+            <input type="password" id="edit-password" class="survey-input" placeholder="Новый пароль (если нужно)" />
+            <input type="password" id="edit-password-confirm" class="survey-input" placeholder="Подтвердите пароль" />
+            <p class="field-hint">Оставьте поля пустыми, если не хотите менять</p>
+            <p class="error-msg" id="edit-error"></p>
+            <div style="display:flex;gap:10px;">
+              <button class="btn-primary" onclick="saveProfile()" style="flex:1;">Сохранить</button>
+              <button class="btn-secondary" onclick="hideEditProfile()" style="flex:1;">Отмена</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="account-stats">
+          <div class="stat"><span id="routes-count">0</span><p>Маршрутов</p></div>
+        </div>
+
+        <!-- ВЫБОР ТЕМЫ ОФОРМЛЕНИЯ -->
+        <div class="theme-section">
+          <h3>Оформление</h3>
+          <p class="theme-hint">Выберите цветовую тему сайта</p>
+          <div class="theme-grid">
+            <button class="theme-card" data-theme="green">
+              <div class="theme-preview theme-green-preview">
+                <span class="theme-dot"></span><span class="theme-dot"></span>
+              </div>
+              <span>Светло-зелёная</span>
+            </button>
+            <button class="theme-card" data-theme="beige">
+              <div class="theme-preview theme-beige-preview">
+                <span class="theme-dot"></span><span class="theme-dot"></span>
+              </div>
+              <span>Бежевая</span>
+            </button>
+            <button class="theme-card" data-theme="blue">
+              <div class="theme-preview theme-blue-preview">
+                <span class="theme-dot"></span><span class="theme-dot"></span>
+              </div>
+              <span>Голубая</span>
+            </button>
+          </div>
+        </div>
+
+        <h3>Сохранённые маршруты</h3>
+        <div id="saved-routes-list"></div>
+
+        <!-- Кнопки удаления и выхода в один ряд -->
+        <div style="display:flex;gap:10px;margin-top:24px;">
+          <button class="btn-danger" onclick="deleteAccount()" style="flex:1;">⚠️ Удалить аккаунт</button>
+          <button class="btn-secondary" onclick="logout()" style="flex:1;">Выйти</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Страница анкеты -->
+    <div id="page-survey" class="page">
+      <div class="survey-container">
+        <div class="survey-progress">
+          <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+          <span id="progress-label">Шаг 1 из 10</span>
+        </div>
+        <div id="survey-steps"></div>
+        <div class="survey-nav">
+          <button class="btn-secondary" id="btn-prev" onclick="surveyPrev()" style="display:none">← Назад</button>
+          <button class="btn-primary" id="btn-next" onclick="surveyNext()">Далее →</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Страница результата маршрута -->
+        <!-- Страница результата маршрута -->
+    <div id="page-result" class="page">
+      <div class="result-header">
+        <h2>Ваш маршрут готов</h2>
+        <div class="result-meta" id="result-meta"></div>
+        <button class="btn-primary" onclick="saveRoute()">Сохранить</button>
+        <button class="btn-secondary" onclick="showPage('survey')">Создать новый</button>
+      </div>
+
+      <!-- Предупреждение о часах работы -->
+      <div id="warning-box" class="warning-box" style="display:none;">
+        ⚠️ Часы работы мест могут быть неактуальны. Рекомендуем проверять перед посещением.
+      </div>
+
+      <!-- Панель управления маршрутом -->
+      <div id="route-controls" style="max-width:900px;margin:0 auto 16px;padding:0 20px;display:flex;gap:10px;flex-wrap:wrap;">
+        <button class="btn-secondary btn-sm" onclick="addPointToRoute()">➕ Добавить место</button>
+        <button class="btn-secondary btn-sm" onclick="regenerateRoute()">🔄 Перестроить маршрут</button>
+        <span style="color:var(--text-muted);font-size:0.85rem;margin-left:auto;align-self:center;" id="route-points-count"></span>
+      </div>
+
+      <!-- Форма добавления места (скрыта) -->
+      <div id="add-point-form" class="hidden" style="max-width:900px;margin:0 auto 16px;padding:0 20px;">
+        <div style="display:flex;gap:10px;background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:16px;">
+          <input class="survey-input" id="new-point-name" placeholder="Название места (например: Кофейня Даблби)" style="margin-bottom:0;flex:1;" />
+          <button class="btn-primary" onclick="confirmAddPoint()" style="width:auto;flex-shrink:0;">Добавить</button>
+          <button class="btn-secondary" onclick="cancelAddPoint()" style="width:auto;flex-shrink:0;">Отмена</button>
+        </div>
+        <p class="field-hint" id="add-point-status"></p>
+      </div>
+
+      <div class="map-section">
+        <div id="result-map"></div>
+        <div class="points-sidebar">
+          <h4>Точки маршрута</h4>
+          <div class="point-list" id="result-point-list"></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+        <!-- Модальное окно редактирования маршрута -->
+        <div id="edit-route-modal" class="overlay hidden" style="z-index:1001;">
+          <div class="modal" style="max-width:500px;">
+            <h3>Редактировать маршрут</h3>
+            
+            <label class="field-label">Название</label>
+            <input type="text" id="edit-route-title" class="survey-input" placeholder="Название маршрута" />
+            
+            <label class="field-label" style="margin-top:12px;">Заметка</label>
+            <textarea id="edit-route-note" class="survey-input" placeholder="Опишите маршрут: с кем были, что понравилось..." style="min-height:100px;resize:vertical;"></textarea>
+            
+            <label class="field-label" style="margin-top:12px;">Фотографии</label>
+            <input type="file" id="edit-route-photos" accept="image/*" multiple style="margin-bottom:8px;" />
+            <div id="edit-route-photos-preview" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
+            
+            <p class="error-msg" id="edit-route-error"></p>
+            <div style="display:flex;gap:10px;margin-top:16px;">
+              <button class="btn-primary" onclick="saveRouteEdit()" style="flex:1;">Сохранить</button>
+              <button class="btn-secondary" onclick="closeEditRouteModal()" style="flex:1;">Отмена</button>
+            </div>
+          </div>
+        </div>
+
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/map.js"></script>
+  <script src="js/survey.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+[submodule "themes/ananke"]
+	path = themes/ananke
+	url = https://github.com/theNewDynamic/gohugo-theme-ananke.git
+[submodule "my-hiking-site/themes/ananke"]
+	path = my-hiking-site/themes/ananke
+	url = https://github.com/theNewDynamic/gohugo-theme-ananke.git
+[submodule "my-hiking-site/themes/hello-friend"]
+	path = my-hiking-site/themes/hello-friend
+	url = https://github.com/rhazdon/hugo-theme-hello-friend-ng.git
