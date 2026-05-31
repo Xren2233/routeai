@@ -4,12 +4,10 @@
   if (savedTheme) {
     document.body.classList.add('theme-' + savedTheme);
   }
-  // Если нет сохранённой темы — остаются цвета :root (тёмно-синяя база)
 })();
-// ===== APP ROUTER =====
 
 // ── WebSocket — статус генерации ─────────────────────────────────────────
-const socket = io('http://localhost:5000');
+const socket = io();
 
 socket.on('route_status', (data) => {
   const el = document.getElementById('loading-overlay');
@@ -17,13 +15,6 @@ socket.on('route_status', (data) => {
 });
 
 socket.on('connect', () => console.log('[WS] Подключено'));
-
-// ===== ЗАЩИТА ОТ XSS =====
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
 
 function showPage(name) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
@@ -48,7 +39,6 @@ function showPage(name) {
   if (name === 'survey') initSurvey();
   if (name === 'account') {
     if (isGuest && !token) {
-      // Гость пытается зайти в аккаунт — показываем окно входа
       document.getElementById('app').classList.add('hidden');
       document.getElementById('auth-overlay').classList.add('active');
       showLogin();
@@ -56,6 +46,7 @@ function showPage(name) {
     }
     loadMyRoutes();
     updateActiveThemeCard();
+    loadAvatar();  // ← добавить
   }
 }
 
@@ -74,10 +65,12 @@ function saveRoute() {
     return;
   }
 
-  fetch('http://localhost:5000/api/routes/save', {
+  const note = prompt('Добавьте заметку к маршруту (необязательно):', '');
+  
+  fetch('/api/routes/save', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-    body: JSON.stringify({ places: result.places, meta: result.meta }),
+    body: JSON.stringify({ places: result.places, meta: result.meta, note: note || '' }),
   })
   .then(r => r.json())
   .then(data => {
@@ -95,11 +88,13 @@ async function loadMyRoutes() {
   const token = localStorage.getItem('token');
   if (!token) return;
   try {
-    const res  = await fetch('http://localhost:5000/api/routes/my', {
+    const res = await fetch('/api/routes/my', {
       headers: { 'Authorization': `Bearer ${token}` }
     });
     const data = await res.json();
-    renderSavedRoutes(data);
+    // Поддержка и старого (массив), и нового (объект) формата
+    const routes = Array.isArray(data) ? data : (data.routes || []);
+    renderSavedRoutes(routes);
   } catch (e) {
     console.warn('Не удалось загрузить маршруты:', e);
   }
@@ -123,16 +118,18 @@ function renderSavedRoutes(routes) {
         <strong id="route-title-${r.id}">${escapeHtml(r.title)}</strong>
         <span class="saved-route-meta">${escapeHtml(r.meta || '')}</span>
         <span class="saved-route-date">${new Date(r.created_at).toLocaleDateString('ru-RU')}</span>
+        ${r.note ? `<p style="color:var(--text-muted);font-size:0.82rem;margin-top:4px;"> ${escapeHtml(r.note)}</p>` : ''}
+        ${r.photos && r.photos.length ? `<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">${r.photos.map(url => `<img src="${url}" class="route-photo-thumb" />`).join('')}</div>` : ''}
       </div>
       <div class="saved-route-actions">
-        <button class="btn-secondary btn-sm" onclick="renameRoutePrompt(${r.id})" title="Переименовать">✏️</button>
+        <button class="btn-secondary btn-sm" onclick="openEditRouteModal(${r.id})" title="Редактировать">Редактировать</button>
+        <button class="btn-secondary btn-sm" onclick="renameRoutePrompt(${r.id})" title="Переименовать">Переименовать</button>
         <button class="btn-secondary btn-sm" onclick="openSavedRoute(${r.id})">Открыть</button>
         <button class="btn-danger btn-sm" onclick="deleteRoute(${r.id})">✕</button>
       </div>
     </div>
   `).join('');
 
-  // Кэшируем для открытия
   window._savedRoutes = routes;
 }
 
@@ -150,7 +147,7 @@ function openSavedRoute(id) {
 async function deleteRoute(id) {
   if (!confirm('Удалить маршрут?')) return;
   const token = localStorage.getItem('token');
-  await fetch(`http://localhost:5000/api/routes/${id}`, {
+  await fetch(`/api/routes/${id}`, {
     method: 'DELETE',
     headers: { 'Authorization': `Bearer ${token}` },
   });
@@ -159,8 +156,6 @@ async function deleteRoute(id) {
 
 // ===== ПЕРЕКЛЮЧЕНИЕ ТЕМ =====
 
-// Применяет тему
-// ===== ПЕРЕКЛЮЧЕНИЕ ТЕМ =====
 
 document.addEventListener('click', function(e) {
   const card = e.target.closest('.theme-card');
@@ -184,7 +179,7 @@ function setTheme(themeName) {
 }
 
 function updateActiveThemeCard() {
-  const currentTheme = localStorage.getItem('routeai-theme') || 'null';
+  const currentTheme = localStorage.getItem('routeai-theme') || 'default';
   document.querySelectorAll('.theme-card').forEach(card => {
     card.classList.toggle('active', card.getAttribute('data-theme') === currentTheme);
   });
@@ -202,16 +197,168 @@ function loadSavedTheme() {
 // Применяем тему сразу при загрузке страницы
 loadSavedTheme();
 
+// ===== АВАТАР =====
+
+function getAvatarKey() {
+  const user = JSON.parse(localStorage.getItem('user') || '{}');
+  return 'avatar_' + (user.email || 'guest');
+}
+
+function loadAvatar() {
+  const avatarData = localStorage.getItem(getAvatarKey());
+  const mainImg = document.getElementById('avatar-img');
+  const mainPlaceholder = document.getElementById('avatar-placeholder');
+  const editImg = document.getElementById('edit-avatar-img');
+  const editPlaceholder = document.getElementById('edit-avatar-placeholder');
+
+  if (avatarData) {
+    if (mainImg) { mainImg.src = avatarData; mainImg.style.display = 'block'; }
+    if (mainPlaceholder) mainPlaceholder.style.display = 'none';
+    if (editImg) { editImg.src = avatarData; editImg.style.display = 'block'; }
+    if (editPlaceholder) editPlaceholder.style.display = 'none';
+  } else {
+    if (mainImg) mainImg.style.display = 'none';
+    if (mainPlaceholder) mainPlaceholder.style.display = 'block';
+    if (editImg) editImg.style.display = 'none';
+    if (editPlaceholder) editPlaceholder.style.display = 'block';
+  }
+}
+
+function uploadAvatar(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  if (file.size > 2 * 1024 * 1024) { alert('Файл слишком большой.'); return; }
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    localStorage.setItem(getAvatarKey(), e.target.result);
+    loadAvatar();
+  };
+  reader.readAsDataURL(file);
+}
+
+function removeAvatar() {
+  localStorage.removeItem(getAvatarKey());
+  loadAvatar();
+}
+
+// ===== РЕДАКТИРОВАНИЕ ЗАМЕТКИ МАРШРУТА =====
+
+// ===== РЕДАКТИРОВАНИЕ МАРШРУТА (МОДАЛЬНОЕ ОКНО) =====
+
+let _editingRouteId = null;
+let _editingPhotos = [];  // Временное хранилище фото (data URL)
+
+function openEditRouteModal(routeId) {
+  const route = window._savedRoutes?.find(r => r.id === routeId);
+  if (!route) return;
+
+  _editingRouteId = routeId;
+  _editingPhotos = (route.photos && Array.isArray(route.photos)) ? [...route.photos] : [];
+
+  document.getElementById('edit-route-title').value = route.title || '';
+  document.getElementById('edit-route-note').value = route.note || '';
+  document.getElementById('edit-route-error').textContent = '';
+  renderPhotoPreviews();
+
+  document.getElementById('edit-route-modal').classList.remove('hidden');
+  
+  // Обработчик загрузки фото
+  document.getElementById('edit-route-photos').onchange = function(e) {
+    const files = Array.from(e.target.files);
+    files.forEach(file => {
+      if (file.size > 2 * 1024 * 1024) { alert('Фото слишком большое (макс 2MB)'); return; }
+      const reader = new FileReader();
+      reader.onload = function(ev) {
+        _editingPhotos.push(ev.target.result);
+        renderPhotoPreviews();
+      };
+      reader.readAsDataURL(file);
+    });
+    e.target.value = '';
+  };
+}
+
+function renderPhotoPreviews() {
+  const container = document.getElementById('edit-route-photos-preview');
+  if (!container) return;
+  container.innerHTML = _editingPhotos.map((url, i) => `
+    <div class="photo-thumb-wrapper">
+      <img src="${url}" class="photo-thumb" />
+      <button class="remove-photo" onclick="_editingPhotos.splice(${i}, 1); renderPhotoPreviews();">✕</button>
+    </div>
+  `).join('');
+}
+
+function renderPhotoPreviews() {
+  const container = document.getElementById('edit-route-photos-preview');
+  container.innerHTML = _editingPhotos.map((url, i) => `
+    <div class="photo-thumb-wrapper">
+      <img src="${url}" class="photo-thumb" />
+      <button class="remove-photo" onclick="_editingPhotos.splice(${i}, 1); renderPhotoPreviews();">✕</button>
+    </div>
+  `).join('');
+}
+
+function closeEditRouteModal() {
+  document.getElementById('edit-route-modal').classList.add('hidden');
+  _editingRouteId = null;
+  _editingPhotos = [];
+}
+
+async function saveRouteEdit() {
+  const route = window._savedRoutes?.find(r => r.id === _editingRouteId);
+  if (!route) return;
+
+  const newTitle = document.getElementById('edit-route-title').value.trim();
+  const newNote = document.getElementById('edit-route-note').value.trim();
+  const token = localStorage.getItem('token');
+  const errorEl = document.getElementById('edit-route-error');
+
+  if (!newTitle) {
+    errorEl.textContent = 'Название не может быть пустым';
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/routes/${_editingRouteId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        title: newTitle,
+        note: newNote,
+        photos: _editingPhotos  // Пока храним в JSON (для MVP ок)
+      })
+    });
+
+    if (res.ok) {
+      route.title = newTitle;
+      route.note = newNote;
+      route.photos = _editingPhotos;
+      renderSavedRoutes(window._savedRoutes);
+      closeEditRouteModal();
+    } else {
+      const data = await res.json();
+      errorEl.textContent = data.error || 'Ошибка сохранения';
+    }
+  } catch (e) {
+    errorEl.textContent = 'Ошибка соединения с сервером';
+  }
+}
+
 // ===== РЕДАКТИРОВАНИЕ ПРОФИЛЯ =====
 
 function showEditProfile() {
   document.getElementById('edit-profile-form').classList.remove('hidden');
+  // Предзаполняем имя
   const currentName = document.getElementById('account-name').textContent;
   document.getElementById('edit-name').value = currentName;
+  // Очищаем поля пароля
   document.getElementById('edit-password').value = '';
   document.getElementById('edit-password-confirm').value = '';
   document.getElementById('edit-error').textContent = '';
-  loadAvatar(); 
 }
 
 function hideEditProfile() {
@@ -255,7 +402,7 @@ async function saveProfile() {
   if (password) body.password = password;
 
   try {
-    const res = await fetch('http://localhost:5000/api/auth/me', {
+    const res = await fetch('/api/auth/me', {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -291,7 +438,7 @@ async function renameRoutePrompt(routeId) {
   if (!token) return;
 
   try {
-    const res = await fetch(`http://localhost:5000/api/routes/${routeId}`, {
+    const res = await fetch(`/api/routes/${routeId}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -362,7 +509,7 @@ async function deleteAccount() {
   if (!token) return;
 
   try {
-    const res = await fetch('http://localhost:5000/api/auth/me', {
+    const res = await fetch('/api/auth/me', {
       method: 'DELETE',
       headers: {
         'Authorization': `Bearer ${token}`
@@ -415,110 +562,93 @@ async function confirmAddPoint() {
     return;
   }
 
-  // Центр маршрута для поиска
-  const midIndex = Math.floor(points.length / 2);
-  const centerLat = points[midIndex].coords[0];
-  const centerLon = points[midIndex].coords[1];
+  // Ищем ближайшую точку маршрута к старту 
+  const startCoords = points[0].coords;
+  const endCoords = points[points.length - 1].coords;
 
   try {
-    // Запрашиваем больше вариантов
-    const res = await fetch('http://localhost:5000/api/geo/geocode', {
+    // Запрашиваем ДО 5 результатов, чтобы выбрать ближайший
+    const res = await fetch('/api/geo/geocode', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
         places: [{ name }], 
         city: 'Москва',
-        near_lat: centerLat,
-        near_lon: centerLon,
-        radius_km: 3.0,  // Уменьшаем радиус поиска
-        limit: 10        // Больше вариантов
+        near_lat: startCoords[0],
+        near_lon: startCoords[1],
+        radius_km: 8.0,
+        limit: 5  
       }),
     });
 
     const data = await res.json();
     
-    if (!res.ok || !data.length) {
-      statusEl.textContent = 'Место не найдено. Уточните название';
+    if (!res.ok || !data.length || !data[0].coords) {
+      statusEl.textContent = 'Место не найдено. Уточните: «Название, Москва»';
       statusEl.style.color = 'var(--error)';
       return;
     }
 
-    // Фильтруем только те, у которых есть координаты
-    const validResults = data.filter(r => r.coords && r.coords.length === 2);
-    
-    if (validResults.length === 0) {
-      statusEl.textContent = 'Не удалось определить координаты';
-      statusEl.style.color = 'var(--error)';
-      return;
-    }
-
-    // Ищем ближайший результат к любой точке маршрута
-    let bestResult = null;
+    let bestPoint = null;
     let bestDist = Infinity;
-    let bestInsertAfter = 1;
+    let bestInsertAfter = 1;  
 
-    for (const result of validResults) {
+    for (const result of data) {
+      if (!result.coords) continue;
+      
       const [rlat, rlon] = result.coords;
       
-      for (let i = 0; i < points.length; i++) {
+      for (let i = 0; i < points.length - 1; i++) {
         const [plat, plon] = points[i].coords;
         const dist = haversineDistance(plat, plon, rlat, rlon);
         
         if (dist < bestDist) {
           bestDist = dist;
-          bestResult = result;
-          bestInsertAfter = i + 1;
+          bestPoint = result;
+          bestInsertAfter = i + 1;  // Вставляем после ближайшей точки
         }
       }
     }
 
-    if (!bestResult) {
-      statusEl.textContent = 'Не удалось найти подходящее место поблизости';
+    if (!bestPoint) {
+      statusEl.textContent = 'Не удалось найти подходящее место';
       statusEl.style.color = 'var(--error)';
       return;
     }
 
-    // Проверяем, не слишком ли далеко
-    if (bestDist > 5000) {
-      statusEl.textContent = `Ближайшее место в ${(bestDist/1000).toFixed(1)} км. Уточните запрос`;
-      statusEl.style.color = 'var(--error)';
-      return;
-    }
-
-    // Не добавляем дубликаты (ближе 50м)
-    const tooClose = points.some(p => {
-      const d = haversineDistance(p.coords[0], p.coords[1], bestResult.coords[0], bestResult.coords[1]);
-      return d < 50;
-    });
-
-    if (tooClose) {
-      statusEl.textContent = 'Такое место уже есть на маршруте';
+    // Не вставляем слишком близко к существующим точкам (меньше 100м)
+    if (bestDist < 100) {
+      statusEl.textContent = 'Такое место уже есть на маршруте (слишком близко)';
       statusEl.style.color = 'var(--error)';
       return;
     }
 
     const newPoint = {
       name: name,
-      coords: bestResult.coords,
-      desc: bestResult.description || `Добавлено (${(bestDist/1000).toFixed(2)} км)`,
+      coords: bestPoint.coords,
+      desc: bestPoint.description || `Добавлено (${(bestDist/1000).toFixed(2)} км от маршрута)`,
       price: '',
       rating: null,
       opening_hours: '',
       wheelchair: '',
     };
 
+    // Вставляем после ближайшей точки
     window._currentRoutePoints.splice(bestInsertAfter, 0, newPoint);
+    
     renderRoutePoints();
     cancelAddPoint();
     initResultMap(window._currentRoutePoints, window._routeTransport);
-
+    
+    console.log(`[ROUTE] Добавлено: ${name} после точки ${bestInsertAfter-1} (${(bestDist/1000).toFixed(2)} км)`);
+    
   } catch (e) {
     statusEl.textContent = 'Ошибка соединения с сервером';
     statusEl.style.color = 'var(--error)';
   }
 }
 
-// Вспомогательная функция расстояния (если ещё нет)
+
 function haversineDistance(lat1, lon1, lat2, lon2) {
   const R = 6371000;
   const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -530,7 +660,7 @@ function haversineDistance(lat1, lon1, lat2, lon2) {
 }
 
 function removePoint(index) {
-  if (index <= 0) return; // Не удаляем стартовую точку
+  if (index <= 0) return; 
   
   const points = window._currentRoutePoints;
   if (!points || index >= points.length) return;
@@ -562,7 +692,7 @@ function regenerateRoute() {
 
   // Отправляем точки на перестроение
   const token = localStorage.getItem('token');
-  fetch('http://localhost:5000/api/ai/generate', {
+  fetch('/api/ai/generate', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -603,62 +733,4 @@ function regenerateRoute() {
     document.getElementById('loading-overlay')?.remove();
     alert('Ошибка соединения с сервером');
   });
-}
-
-// ===== АВАТАР =====
-
-// ===== АВАТАР =====
-
-function loadAvatar() {
-  const avatarData = localStorage.getItem('avatar');
-  const mainImg = document.getElementById('avatar-img');
-  const mainPlaceholder = document.getElementById('avatar-placeholder');
-  const editImg = document.getElementById('edit-avatar-img');
-  const editPlaceholder = document.getElementById('edit-avatar-placeholder');
-
-  if (avatarData) {
-    if (mainImg) {
-      mainImg.src = avatarData;
-      mainImg.style.display = 'block';
-    }
-    if (mainPlaceholder) mainPlaceholder.style.display = 'none';
-    if (editImg) {
-      editImg.src = avatarData;
-      editImg.style.display = 'block';
-    }
-    if (editPlaceholder) editPlaceholder.style.display = 'none';
-  } else {
-    if (mainImg) mainImg.style.display = 'none';
-    if (mainPlaceholder) mainPlaceholder.style.display = 'block';
-    if (editImg) editImg.style.display = 'none';
-    if (editPlaceholder) editPlaceholder.style.display = 'block';
-  }
-}
-
-function uploadAvatar(event) {
-  const file = event.target.files[0];
-  if (!file) return;
-
-  if (file.size > 2 * 1024 * 1024) {
-    alert('Файл слишком большой. Максимум 2MB.');
-    return;
-  }
-
-  if (!file.type.startsWith('image/')) {
-    alert('Можно загружать только изображения.');
-    return;
-  }
-
-  const reader = new FileReader();
-  reader.onload = function(e) {
-    const dataUrl = e.target.result;
-    localStorage.setItem('avatar', dataUrl);
-    loadAvatar(); // Обновляет и основную, и в форме
-  };
-  reader.readAsDataURL(file);
-}
-
-function removeAvatar() {
-  localStorage.removeItem('avatar');
-  loadAvatar();
 }
