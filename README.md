@@ -1,99 +1,39 @@
-```markdown
 # RouteAI — Умные маршруты для прогулок
 
-Веб-сервис, который генерирует персональные маршруты прогулок на основе анкеты пользователя с помощью нейросети.
+Веб-сервис для создания персонализированных пешеходных и велосипедных маршрутов с помощью нейросетей.
 
 ## Возможности
 
--  Персональные маршруты по интересам, бюджету и компании
+-  Генерация маршрутов по интересам, бюджету и компании
 -  Учёт доступности: коляски, пандусы, скамейки
--  Смена темы оформления (4 цветовые схемы)
+-  Смена темы оформления (3 цветовые схемы)
 -  Гостевой режим без регистрации
--  Редактирование маршрута (добавить/удалить точки)
+-  Редактирование маршрута (добавление/удаление точек)
 -  Аватар и редактирование профиля
 
-## Стек
+## Технологии
 
-- **Frontend:** HTML, CSS, Vanilla JS, Leaflet
+- **Frontend:** HTML, CSS, JavaScript, Leaflet
 - **Backend:** Python, Flask, SQLAlchemy, JWT, Socket.IO
-- **БД:** SQLite (dev) / PostgreSQL (prod)
-- **AI:** YandexGPT / GigaChat
-- **Геоданные:** Nominatim (OSM), Overpass API
+- **База данных:** SQLite
+- **Нейросети:** YandexGPT / GigaChat
+- **Карты:** Яндекс.Карты, OpenStreetMap (Overpass API)
 
-## Структура проекта
-
-```
-backend/
-├── routes/           # Blueprints (auth, ai, geo, routes_bp)
-├── app.py            # Flask + Socket.IO
-├── database.py       # Модели (User, Route, FavoritePlace)
-├── requirements.txt
-└── Dockerfile
-
-frontend/
-├── css/style.css     # Стили с темами
-├── js/
-│   ├── app.js        # Роутер, темы, профиль
-│   ├── auth.js       # Авторизация, guest
-│   ├── survey.js     # Анкета, генерация
-│   └── map.js        # Leaflet карта
-└── index.html
-```
-
-## Быстрый старт
-
-### Локально
+## Установка и запуск
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/Xren2233/routeai.git
 cd my-sitee
 
+# Настроить переменные окружения
 cp backend/.env.example backend/.env
-# Заполнить backend/.env ключами
+# Отредактировать backend/.env — добавить ключи API
 
+# Запуск
 cd backend
 pip install -r requirements.txt
 python app.py
 
-# В другом терминале
-cd frontend
-python -m http.server 8080
+## Демо
 
-# Открыть http://localhost:8080
-```
-
-### Docker
-
-```bash
-cp backend/.env.example backend/.env
-docker-compose up --build
-# Frontend: http://localhost:8080
-# Backend:  http://localhost:5000
-```
-
-## Переменные окружения
-
-| Переменная           | Описание                          |
-|----------------------|-----------------------------------|
-| `JWT_SECRET`         | Секрет для JWT токенов            |
-| `GIGACHAT_CREDENTIALS` | Base64 ключ GigaChat            |
-| `YANDEX_GPT_KEY`     | API ключ YandexGPT                |
-| `YANDEX_FOLDER_ID`   | Folder ID Яндекс Облака           |
-| `DATABASE_URL`       | URL базы данных                   |
-
-## API эндпоинты
-
-| Метод  | URL                    | Описание                    |
-|--------|------------------------|-----------------------------|
-| POST   | /api/auth/register     | Регистрация                 |
-| POST   | /api/auth/login        | Вход                        |
-| GET    | /api/auth/me           | Текущий пользователь        |
-| PUT    | /api/auth/me           | Обновить профиль            |
-| DELETE | /api/auth/me           | Удалить аккаунт             |
-| POST   | /api/ai/generate       | Генерация маршрута          |
-| POST   | /api/ai/suggest-metro  | Подбор станций метро        |
-| GET    | /api/routes/my         | Мои маршруты                |
-| POST   | /api/routes/save       | Сохранить маршрут           |
-| PUT    | /api/routes/:id        | Переименовать маршрут       |
-| DELETE | /api/routes/:id        | Удалить маршрут             |
-```
+[Открыть сайт](https://routeai.pythonanywhere.com)
