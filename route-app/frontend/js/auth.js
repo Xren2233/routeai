@@ -1,6 +1,6 @@
 // ===== AUTH MODULE =====
 
-const API_BASE = 'http://localhost:5000/api';
+const API_BASE = '/api';
 
 function showLogin() {
   document.getElementById('register-form').classList.add('hidden');
@@ -69,18 +69,18 @@ function saveAndEnter(data) {
 }
 
 function enterApp(user) {
-  localStorage.removeItem('guest');
+  localStorage.removeItem('guest');  // ← ДОБАВИТЬ (сбрасываем гостя при входе)
   document.getElementById('auth-overlay').classList.remove('active');
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('account-name').textContent  = user.name;
   document.getElementById('account-email').textContent = user.email;
-  loadAvatar();  // ← ДОБАВИТЬ
+  if (typeof loadAvatar === 'function') loadAvatar();
 }
+
 function logout() {
   localStorage.removeItem('token');
   localStorage.removeItem('user');
-  localStorage.removeItem('guest');
-  localStorage.removeItem('avatar');  // ← ДОБАВИТЬ
+  localStorage.removeItem('guest');  // ← ДОБАВИТЬ
   document.getElementById('app').classList.add('hidden');
   document.getElementById('auth-overlay').classList.add('active');
   showRegister();
