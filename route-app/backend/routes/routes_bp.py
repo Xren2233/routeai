@@ -14,6 +14,7 @@ def save_route():
     places  = data.get('places', [])
     meta    = data.get('meta', '')
     title   = data.get('title') or _auto_title(places)
+    note    = data.get('note', '')
 
     if not places:
         return jsonify(error='Нет точек маршрута'), 400
@@ -22,25 +23,38 @@ def save_route():
         user_id=user_id,
         title=title,
         meta=meta,
-        places=json.dumps(places, ensure_ascii=False)
+        places=json.dumps(places, ensure_ascii=False),
+        note=note,
     )
     db.session.add(route)
     db.session.commit()
     return jsonify(id=route.id, title=route.title), 201
 
-
 @routes_bp.get('/my')
 @jwt_required()
 def my_routes():
     user_id = int(get_jwt_identity())
-    rows    = Route.query.filter_by(user_id=user_id).order_by(Route.created_at.desc()).all()
-    return jsonify([{
-        'id':         r.id,
-        'title':      r.title,
-        'meta':       r.meta,
-        'places':     json.loads(r.places),
-        'created_at': r.created_at.isoformat(),
-    } for r in rows])
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 10, type=int)
+    
+    pagination = Route.query.filter_by(user_id=user_id)\
+        .order_by(Route.created_at.desc())\
+        .paginate(page=page, per_page=per_page, error_out=False)
+    
+    return jsonify({
+        'routes': [{
+            'id': r.id,
+            'title': r.title,
+            'meta': r.meta,
+            'places': json.loads(r.places),
+            'note': r.note or '',
+            'photos': json.loads(r.photos) if r.photos else [],
+            'created_at': r.created_at.isoformat(),
+        } for r in pagination.items],
+        'total': pagination.total,
+        'pages': pagination.pages,
+        'page': page,
+    })
 
 
 @routes_bp.delete('/<int:route_id>')
@@ -53,10 +67,10 @@ def delete_route(route_id):
     db.session.delete(route)
     db.session.commit()
     return jsonify(ok=True)
+
 @routes_bp.put('/<int:route_id>')
 @jwt_required()
 def update_route(route_id):
-    """Переименование маршрута"""
     user_id = int(get_jwt_identity())
     route = Route.query.filter_by(id=route_id, user_id=user_id).first()
 
@@ -64,10 +78,16 @@ def update_route(route_id):
         return jsonify(error='Маршрут не найден'), 404
 
     data = request.get_json(silent=True)
-    if not data or not data.get('title', '').strip():
-        return jsonify(error='Название маршрута не может быть пустым'), 400
+    if not data:
+        return jsonify(error='Нет данных'), 400
 
-    route.title = data['title'].strip()
+    if 'title' in data and data['title'].strip():
+        route.title = data['title'].strip()
+    if 'note' in data:
+        route.note = data['note']
+    if 'photos' in data:
+        route.photos = json.dumps(data['photos'], ensure_ascii=False)
+
     db.session.commit()
 
     return jsonify({
@@ -75,6 +95,8 @@ def update_route(route_id):
         'title': route.title,
         'meta': route.meta,
         'places': route.places,
+        'note': route.note or '',
+        'photos': json.loads(route.photos) if route.photos else [],
         'created_at': route.created_at.isoformat()
     })
 
