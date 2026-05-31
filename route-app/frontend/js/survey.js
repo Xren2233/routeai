@@ -1,10 +1,16 @@
 // ===== SURVEY MODULE =====
 
-const API_BASE_SURVEY = 'http://localhost:5000/api';
+const API_BASE_SURVEY = '/api';
 let currentStep = 0;
 const surveyData = {};
 
-// ── Хелперы ───────────────────────────────────────────────────────────────
+function escapeHtml(text) {
+  if (!text) return '';
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
 function opt(key, val, label) {
   const sel = surveyData[key] === val ? 'selected' : '';
   return `<button class="option-btn ${sel}" onclick="selectOpt('${key}','${val}',this)">
@@ -40,13 +46,16 @@ function getSteps() {
     // Шаг 1: Старт
     {
       id: 'location',
-      title: '📍 Откуда начинаем?',
+      title: 'Откуда начинаем?',
       desc: 'Введите адрес, район или название места',
       render: () => `
         <input class="survey-input" id="s-location"
           placeholder="Например: Арбат, Москва или Невский проспект, СПб"
           value="${surveyData.location || ''}" />
         <p class="field-hint">Чем точнее адрес — тем лучше маршрут</p>
+        <button class="btn-secondary btn-sm" onclick="getMyLocation()" style="width:100%;margin-bottom:8px;">
+          📍 Определить моё местоположение
+        </button>
         <div style="margin-top:12px">
           <button class="btn-metro" onclick="openMetroSuggest()">
             🚇 Подобрать станцию метро
@@ -70,10 +79,10 @@ function getSteps() {
       desc: 'Выберите длительность прогулки',
       render: () => `
         <div class="option-grid cols-4">
-          ${opt('duration', '1', '1 час')}
-          ${opt('duration', '2', '2 часа')}
-          ${opt('duration', '3', '3 часа')}
-          ${opt('duration', '4', '4 часа')}
+          ${opt('duration', '1',  '1 час')}
+          ${opt('duration', '2',  '2 часа')}
+          ${opt('duration', '3',  '3 часа')}
+          ${opt('duration', '4',  '4 часа')}
         </div>
         <p class="field-label" style="margin-top:20px">Или расстояние</p>
         <div class="option-grid cols-3">
@@ -101,7 +110,7 @@ function getSteps() {
           ${multi('categories', 'embankment',     'Набережная')}
           ${multi('categories', 'forest',         'Лесопарк')}
           ${multi('categories', 'viewpoint',      'Смотровая')}
-          ${multi('categories', 'museum',         'Музей')}
+          ${multi('categories', 'museum',        'Музей')}
           ${multi('categories', 'gallery',        'Галерея')}
           ${multi('categories', 'attraction',     'Достопримечательность')}
           ${multi('categories', 'entertainment',  'Развлечения')}
@@ -137,7 +146,7 @@ function getSteps() {
         <p class="field-label" style="margin-top:20px">Время суток</p>
         <div class="option-grid cols-4">
           ${opt('daytime', 'morning',  'Утро')}
-          ${opt('daytime', 'day',      'День')}
+          ${opt('daytime', 'day',     'День')}
           ${opt('daytime', 'evening',  'Вечер')}
           ${opt('daytime', 'night',    'Ночь')}
         </div>
@@ -154,9 +163,9 @@ function getSteps() {
       render: () => `
         <p class="field-label">Интенсивность</p>
         <div class="option-grid cols-3">
-          ${opt('intensity', 'chill',    'Спокойная')}
-          ${opt('intensity', 'active',   'Активная')}
-          ${opt('intensity', 'sport',    'Спорт / бег')}
+          ${opt('intensity', 'chill',   'Спокойная')}
+          ${opt('intensity', 'active',  'Активная')}
+          ${opt('intensity', 'sport',   'Спорт / бег')}
         </div>
         <p class="field-label" style="margin-top:20px">Безопасность дорог</p>
         <div class="option-grid cols-2">
@@ -195,14 +204,14 @@ function getSteps() {
         <div class="option-grid cols-3">
           ${opt('transport', 'walk',   'Пешком')}
           ${opt('transport', 'bike',   'Велосипед')}
-          ${opt('transport', 'mixed',  'Смешанный')}
+          ${opt('transport', 'mixed', 'Смешанный')}
         </div>
                 <p class="field-label" style="margin-top:20px">Бюджет</p>
         <div class="option-grid cols-2">
           ${opt('budget', 'free',       'Только бесплатное')}
-          ${opt('budget', 'economy',    'Эконом')}
-          ${opt('budget', 'medium',     'Средний')}
-          ${opt('budget', 'unlimited',  'Без ограничений')}
+          ${opt('budget', 'economy',  'Эконом')}
+          ${opt('budget', 'medium', 'Средний')}
+          ${opt('budget', 'unlimited', 'Без ограничений')}
         </div>
         <div id="budget-custom-group" class="${surveyData.budget === 'custom' ? '' : 'hidden'}" style="margin-top:8px;">
           <input class="survey-input" id="s-budget-amount" type="number"
@@ -210,7 +219,7 @@ function getSteps() {
             value="${surveyData.budgetAmount || ''}" />
         </div>
         <button class="btn-secondary btn-sm" onclick="setCustomBudget()" style="margin-top:8px;">
-           Своя сумма
+          💵 Своя сумма
         </button>
         <input class="survey-input" id="s-include"
           placeholder="Например: Парк Горького (необязательно)"
@@ -226,6 +235,25 @@ function getSteps() {
       validate: () => true
     },
   ];
+}
+
+function getMyLocation() {
+  if (!navigator.geolocation) {
+    alert('Геолокация не поддерживается браузером');
+    return;
+  }
+  
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      const lat = pos.coords.latitude;
+      const lon = pos.coords.longitude;
+      document.getElementById('s-location').value = `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+      surveyData.location = `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+    },
+    () => {
+      alert('Не удалось определить местоположение. Введите адрес вручную.');
+    }
+  );
 }
 
 // ── Рендер ────────────────────────────────────────────────────────────────
@@ -297,6 +325,16 @@ async function submitSurvey() {
       return;
     }
 
+    // Проверяем данные
+    console.log('Ответ от сервера:', data);
+    console.log('places:', data.places);
+    console.log('meta:', data.meta);
+
+    if (!data.places || data.places.length < 2) {
+      alert('Не удалось найти места поблизости.');
+      return;
+    }
+
     const points = data.places
       .filter(p => p.coords)
       .map(p => ({
@@ -309,20 +347,17 @@ async function submitSurvey() {
         wheelchair:    p.wheelchair || '',
       }));
 
-    if (points.length < 2) {
-      alert('Не удалось найти места поблизости.');
-      return;
-    }
+    console.log('Обработанные points:', points);
     showRouteResult({ meta: data.meta, points });
   } catch (e) {
     hideLoading();
+    console.error('Ошибка:', e);
     alert('Не удалось подключиться к серверу. Убедитесь что бэкенд запущен.');
   }
 }
 
 // ── Результат ─────────────────────────────────────────────────────────────
 function showRouteResult(result) {
-  // Разбиваем мета на чипы
   const metaEl = document.getElementById('result-meta');
   if (result.meta) {
     const parts = result.meta.split('·').map(s => s.trim());
@@ -331,27 +366,26 @@ function showRouteResult(result) {
     ).join('');
   }
 
-  // Предупреждение для вечерних/ночных маршрутов
   const daytime = surveyData?.daytime || '';
   const warningBox = document.getElementById('warning-box');
   if (warningBox) {
     warningBox.style.display = (daytime === 'evening' || daytime === 'night') ? 'block' : 'none';
   }
 
-  // Сохраняем в глобальную переменную для редактирования
   window._currentRoutePoints = JSON.parse(JSON.stringify(result.points));
   window._routeTransport = surveyData?.transport || 'walk';
 
   renderRoutePoints();
   showPage('result');
 
-  // Сохраняем для saveRoute()
   window._lastRouteResult = {
     places: result.points,
     meta: result.meta || '',
   };
 
-  setTimeout(() => initResultMap(result.points, window._routeTransport), 150);
+  setTimeout(() => {
+    initResultMap(result.points, window._routeTransport);
+  }, 150);
 }
 
 function renderRoutePoints() {
@@ -361,7 +395,7 @@ function renderRoutePoints() {
 
   if (countEl) countEl.textContent = `${points.length} точек`;
 
-  list.innerHTML = points.map((p, i) => {       // ← было result.points
+  list.innerHTML = points.map((p, i) => {
     const stars  = p.rating ? '⭐'.repeat(Math.min(Math.round(p.rating), 5)) : '';
     const price  = p.price  ? `<span class="point-price">${p.price}</span>` : '';
     const desc   = p.desc || p.description || '';
@@ -381,27 +415,34 @@ function renderRoutePoints() {
       <div class="point-item" id="point-${i}">
         <span class="point-num">${i + 1}</span>
         <div style="flex:1;">
-          <strong>${escapeHtml(p.name)} ${isStart ? '...' : ''}</strong>
+          <strong>${escapeHtml(p.name)} ${isStart ? '<span style="font-size:0.75rem;color:var(--primary);">(старт)</span>' : ''}</strong>
           <div class="point-meta-row">${stars}${price}</div>
           <p>${escapeHtml(desc)}</p>
           ${hours}${wheel}
         </div>
-        ${!isStart ? `<button class="btn-danger btn-sm" onclick="removePoint(${i})" style="align-self:flex-start;flex-shrink:0;" title="Убрать">✕</button>` : ''}
+        <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end;">
+          ${!isStart ? `<button class="btn-danger btn-sm" onclick="removePoint(${i})" title="Убрать">✕</button>` : ''}
+          <button class="btn-secondary btn-sm" onclick="openInYandexMaps(${p.coords[0]}, ${p.coords[1]}, '${escapeHtml(p.name.replace(/'/g, "\\'"))}')" title="Открыть в Яндекс.Картах" style="font-size:0.75rem;">🗺️</button>
+        </div>
       </div>`;
   }).join('');
 
-  // Обновляем данные для сохранения
   window._lastRouteResult = {
-    places: points,                                         // ← тут points правильно
+    places: points,
     meta: window._lastRouteResult?.meta || '',
   };
+}
+
+function openInYandexMaps(lat, lon, name) {
+  const url = `https://yandex.ru/maps/?ll=${lon}%2C${lat}&z=16&pt=${lon}%2C${lat}&text=${encodeURIComponent(name)}`;
+  window.open(url, '_blank');
 }
 
 function showLoading(text) {
   const el = document.createElement('div');
   el.className = 'loading-overlay';
   el.id = 'loading-overlay';
-  el.innerHTML = `<div class="spinner"></div><p>${escapeHtml(text)}</p>`;
+  el.innerHTML = `<div class="spinner"></div><p>${text}</p>`;
   document.body.appendChild(el);
 }
 
@@ -422,7 +463,7 @@ async function openMetroSuggest() {
   if (!box) return;
 
   btn.disabled = true;
-  btn.textContent = '🚇 Подбираем...';
+  btn.textContent = ' Подбираем...';
   box.classList.add('hidden');
   box.innerHTML = '';
 
@@ -435,7 +476,9 @@ async function openMetroSuggest() {
         city: 'Москва',
       }),
     });
-    const data = await res.json();
+    const text = await res.text();
+    console.log('Ответ сервера:', text);
+    const data = JSON.parse(text);
     if (!res.ok || !data.stations?.length) {
       box.innerHTML = '<p class="field-hint" style="color:var(--error)">Не удалось подобрать станции. Введите адрес вручную.</p>';
       box.classList.remove('hidden');
@@ -449,8 +492,8 @@ async function openMetroSuggest() {
           <button class="metro-station-btn" onclick="selectMetro('${s.name.replace(/'/g,"\\'")}')">
             <span class="metro-icon">🚇</span>
             <div>
-              <strong>${escapeHtml(s.name)}</strong>
-              <p>${escapeHtml(s.description)}</p>
+              <strong>${s.name}</strong>
+              <p>${s.description}</p>
             </div>
           </button>
         `).join('')}
@@ -461,14 +504,14 @@ async function openMetroSuggest() {
     box.classList.remove('hidden');
   } finally {
     btn.disabled = false;
-    btn.textContent = '🚇 Подобрать станцию метро';
+    btn.textContent = ' Подобрать станцию метро';
   }
 }
 
 function selectMetro(stationName) {
   const input = document.getElementById('s-location');
   if (input) {
-    input.value = `Метро ${stationName.replace(/['"]/g, '')}, Москва`;
+    input.value = `Метро ${stationName}, Москва`;
     surveyData.location = input.value;
   }
   // Подсвечиваем выбранную кнопку
