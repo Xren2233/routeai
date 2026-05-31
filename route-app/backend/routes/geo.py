@@ -1,44 +1,83 @@
 from flask import Blueprint, request, jsonify
 import requests, time, math, os, re
-
+# Простой кэш геокодинга
+_geocode_cache = {}
 geo_bp = Blueprint('geo', __name__)
 NOMINATIM = 'https://nominatim.openstreetmap.org/search'
 OVERPASS  = 'https://overpass-api.de/api/interpreter'
 HEADERS   = {'User-Agent': 'RouteAI/1.0 (educational project)'}
 
-# ── Геокодинг старта ──────────────────────────────────────────────────────
-def geocode_start(location_str):
-    time.sleep(0.5)  # Уважаем ограничения Nominatim
-    """Возвращает (lat, lon) для введённого адреса или None."""
-    # Специальная обработка для метро
-    metro_match = re.search(r'метро\s+[«"]?([^»"]+)[»"]?', location_str, re.IGNORECASE)
-    if metro_match:
-        station = metro_match.group(1).strip()
-        coords = _geocode_metro(station)
-        if coords:
-            return coords
+YANDEX_GEOCODER = 'https://geocode-maps.yandex.ru/1.x'
+YANDEX_SEARCH   = 'https://search-maps.yandex.ru/v1/'
 
-    # Обычный геокодинг
+def _geocode_nominatim(location_str):
+    """Старый геокодинг через Nominatim (запасной)."""
+    time.sleep(1.0)
     try:
         r = requests.get(NOMINATIM, params={
             'q': location_str, 'format': 'json',
             'limit': 1, 'accept-language': 'ru',
-        }, headers=HEADERS, timeout=10)
+        }, headers=HEADERS, timeout=20)
         r.encoding = 'utf-8'
         if not r.text.strip():
-            print("[GEO] Nominatim пустой ответ для:", location_str)
             return None
         data = r.json()
         if data:
-            print(f"[GEO] Старт: {data[0].get('display_name','')[:70]}")
+            print(f"[GEO] Nominatim: {data[0].get('display_name','')[:70]}")
             return float(data[0]['lat']), float(data[0]['lon'])
-    except requests.exceptions.JSONDecodeError as e:
-        print(f"[GEO] geocode_start JSON error: {e}, ответ: {r.text[:100]}")
-        return None
     except Exception as e:
-        print(f"[GEO] geocode_start error: {e}")
+        print(f"[GEO] Nominatim error: {e}")
     return None
 
+def geocode_start(location_str):
+    """Геокодинг с кэшированием."""
+    cache_key = location_str.lower().strip()
+    if cache_key in _geocode_cache:
+        print(f"[GEO] Из кэша: '{location_str}'")
+        return _geocode_cache[cache_key]
+    
+    # Если ввели координаты — используем их напрямую
+    coord_match = re.match(r'([\d.]+)\s*[,;]\s*([\d.]+)', location_str)
+    if coord_match:
+        lat, lon = float(coord_match.group(1)), float(coord_match.group(2))
+        if 55.0 < lat < 56.0 and 37.0 < lon < 38.0:
+            print(f"[GEO] Координаты напрямую: ({lat}, {lon})")
+            _geocode_cache[cache_key] = (lat, lon)
+            return lat, lon
+    
+    result = _geocode_start_actual(location_str)
+    if result:
+        _geocode_cache[cache_key] = result
+    return result
+
+def _geocode_start_actual(location_str):
+    """Основной геокодинг через Яндекс с fallback на Nominatim."""
+    time.sleep(0.3)
+    api_key = os.getenv('YANDEX_MAPS_KEY')
+    
+    if api_key:
+        try:
+            r = requests.get(YANDEX_GEOCODER, params={
+                'apikey': api_key,
+                'geocode': location_str,
+                'format': 'json',
+                'results': 1,
+                'lang': 'ru_RU',
+            }, timeout=10)
+            data = r.json()
+            members = data.get('response', {}).get('GeoObjectCollection', {}).get('featureMember', [])
+            if members:
+                point = members[0]['GeoObject']['Point']['pos']
+                lon, lat = map(float, point.split())
+                if 55.0 < lat < 56.0 and 37.0 < lon < 38.0:
+                    print(f"[GEO] Яндекс: '{location_str}' → ({lat}, {lon})")
+                    return lat, lon
+                else:
+                    print(f"[GEO] Яндекс: подозрительные координаты ({lat}, {lon}), пробуем Nominatim")
+        except Exception as e:
+            print(f"[GEO] Яндекс error: {e}")
+    
+    return _geocode_nominatim(location_str)
 
 def _geocode_metro(station_name):
     """Геокодирует станцию метро через несколько стратегий."""
@@ -156,6 +195,68 @@ def _run_overpass(query):
         print(f"[GEO] Overpass error: {e}")
         return None  # None = недоступен, [] = доступен но пусто
 
+def search_pois_yandex(lat, lon, radius_m, categories):
+    """Ищет POI через Яндекс.Карты."""
+    api_key = os.getenv('YANDEX_MAPS_KEY')
+    if not api_key:
+        return None
+    
+    category_map = {
+        'cafe': 'кафе', 'restaurant': 'ресторан', 'bar': 'бар',
+        'park': 'парк', 'museum': 'музей', 'viewpoint': 'смотровая',
+        'attraction': 'достопримечательность', 'zoo': 'зоопарк',
+        'entertainment': 'развлечения', 'sport': 'спорт',
+        'shopping': 'торговый центр', 'supermarket': 'супермаркет',
+        'fast_food': 'фастфуд', 'embankment': 'набережная',
+        'gallery': 'галерея', 'forest': 'парк',
+    }
+    
+    all_pois = []
+    for cat in (categories or [])[:5]:
+        query = category_map.get(cat, cat)
+        try:
+            r = requests.get(YANDEX_SEARCH, params={
+                'apikey': api_key,
+                'text': query,
+                'lang': 'ru_RU',
+                'll': f'{lon},{lat}',
+                'spn': f'{radius_m/111000*0.5},{radius_m/111000*0.5}',
+                'type': 'biz',
+                'results': 15,
+            }, timeout=10)
+            data = r.json()
+            for item in data.get('features', []):
+                props = item.get('properties', {})
+                geom = item.get('geometry', {})
+                coords = geom.get('coordinates', [0, 0])
+                name = props.get('name', '')
+                if not name:
+                    continue
+                company_meta = props.get('CompanyMetaData', {})
+                cat_list = company_meta.get('Categories', [])
+                poi_type = cat_list[0]['name'] if cat_list else cat
+                
+                all_pois.append({
+                    'name': name,
+                    'lat': float(coords[1]),
+                    'lon': float(coords[0]),
+                    'type': poi_type,
+                    'opening_hours': company_meta.get('Hours', {}).get('text', ''),
+                    'wheelchair': 'yes' if 'доступн' in str(company_meta).lower() else '',
+                    'phone': company_meta.get('Phones', [{}])[0].get('formatted', ''),
+                    'website': company_meta.get('url', ''),
+                    'surface': '',
+                    'smoothness': '',
+                    'highway': '',
+                })
+            time.sleep(0.3)
+        except Exception as e:
+            print(f"[GEO] Яндекс поиск '{query}': {e}")
+    
+    if all_pois:
+        print(f"[GEO] Яндекс: {len(all_pois)} POI")
+    return all_pois if all_pois else None
+
 def search_pois(lat, lon, radius_m, categories):
     """
     Ищет POI через Overpass.
@@ -199,36 +300,59 @@ def search_pois(lat, lon, radius_m, categories):
 
     return results
 
-# ── Геокодинг списка мест по названию (fallback) ──────────────────────────
 def geocode_place_name(name, city_hint=''):
-    """Геокодирует одно место по названию через Nominatim."""
-    # Извлекаем город из подсказки (берём первую часть до запятой)
+    """Геокодирует одно место через Яндекс или Nominatim."""
+    time.sleep(0.3)
+    
+    api_key = os.getenv('YANDEX_MAPS_KEY')
     city = city_hint.split(',')[0].strip() if city_hint else ''
-
-    # Несколько стратегий
+    query = f"{name}, {city}" if city else name
+    
+    # Пробуем Яндекс
+    if api_key:
+        try:
+            r = requests.get(YANDEX_GEOCODER, params={
+                'apikey': api_key,
+                'geocode': query,
+                'format': 'json',
+                'results': 1,
+                'lang': 'ru_RU',
+            }, timeout=10)
+            data = r.json()
+            members = data.get('response', {}).get('GeoObjectCollection', {}).get('featureMember', [])
+            if members:
+                point = members[0]['GeoObject']['Point']['pos']
+                lon, lat = map(float, point.split())
+                display_name = members[0]['GeoObject'].get('name', query)
+                print(f"[GEO] Яндекс ✓ '{query}' → {display_name[:50]}")
+                return lat, lon
+        except Exception as e:
+            print(f"[GEO] Яндекс geocode_place error: {e}")
+    
+    # Fallback на Nominatim
     queries = []
     if city:
         queries.append(f"{name}, {city}")
         queries.append(f"{name} {city}")
     queries.append(name)
-
+    
     for q in queries:
         try:
             r = requests.get(NOMINATIM, params={
                 'q': q, 'format': 'json', 'limit': 1,
                 'accept-language': 'ru', 'countrycodes': 'ru',
-            }, headers=HEADERS, timeout=10)
+            }, headers=HEADERS, timeout=20)
             r.encoding = 'utf-8'
-            data = r.json()
-            if data:
-                print(f"[GEO] ✓ '{q}' → {data[0].get('display_name','')[:50]}")
-                return float(data[0]['lat']), float(data[0]['lon'])
+            if r.text.strip():
+                data = r.json()
+                if data:
+                    print(f"[GEO] Nominatim ✓ '{q}' → {data[0].get('display_name','')[:50]}")
+                    return float(data[0]['lat']), float(data[0]['lon'])
         except Exception as e:
             print(f"[GEO] geocode_place_name error: {e}")
         time.sleep(0.8)
-
+    
     return None
-
 
 def geocode_near(name, center_lat, center_lon, radius_km=5.0, city_hint=''):
     """Геокодирует место строго в радиусе radius_km от центра."""
@@ -282,49 +406,81 @@ def geocode_near(name, center_lat, center_lon, radius_km=5.0, city_hint=''):
 
 
 def find_nearest_by_category(query, center_lat, center_lon, max_dist_m, exclude_coords=None):
-    """
-    Ищет ближайшее место по поисковому запросу через Nominatim.
-    Возвращает (lat, lon, name) или None.
-    exclude_coords: список (lat,lon) уже выбранных мест — не берём слишком близкие.
-    """
+    """Ищет ближайшее место через Яндекс или Nominatim."""
+    time.sleep(0.3)
+    
+    api_key = os.getenv('YANDEX_MAPS_KEY')
+    
+    # Пробуем Яндекс
+    if api_key:
+        try:
+            r = requests.get(YANDEX_SEARCH, params={
+                'apikey': api_key,
+                'text': query,
+                'lang': 'ru_RU',
+                'll': f'{center_lon},{center_lat}',
+                'spn': f'{max_dist_m/111000},{max_dist_m/111000}',
+                'type': 'biz',
+                'results': 10,
+            }, timeout=10)
+            data = r.json()
+            candidates = []
+            for item in data.get('features', []):
+                props = item.get('properties', {})
+                geom = item.get('geometry', {})
+                coords = geom.get('coordinates', [0, 0])
+                name = props.get('name', '')
+                if not name:
+                    continue
+                lat, lon = float(coords[1]), float(coords[0])
+                d = haversine(center_lat, center_lon, lat, lon)
+                if d > max_dist_m:
+                    continue
+                if exclude_coords and any(haversine(lat, lon, e[0], e[1]) < 200 for e in exclude_coords):
+                    continue
+                candidates.append((d, lat, lon, name))
+            
+            if candidates:
+                candidates.sort(key=lambda x: x[0])
+                d, lat, lon, name = candidates[0]
+                print(f"[GEO] Яндекс nearest '{query}' → {name} ({d/1000:.2f}км)")
+                return lat, lon, name
+        except Exception as e:
+            print(f"[GEO] Яндекс nearest error: {e}")
+    
+    # Fallback на Nominatim (если Яндекса нет или он не сработал)
     delta = (max_dist_m / 1000) / 111.0
-    viewbox = (f"{center_lon-delta},{center_lat+delta},"
-               f"{center_lon+delta},{center_lat-delta}")
+    viewbox = (f"{center_lon-delta},{center_lat+delta},{center_lon+delta},{center_lat-delta}")
     try:
         r = requests.get(NOMINATIM, params={
             'q': query, 'format': 'json', 'limit': 10,
             'accept-language': 'ru', 'countrycodes': 'ru',
             'viewbox': viewbox, 'bounded': 1,
-        }, headers=HEADERS, timeout=10)
+        }, headers=HEADERS, timeout=20)
         r.encoding = 'utf-8'
-        results = r.json()
-
-        # Сортируем по расстоянию от текущей позиции
-        candidates = []
-        for item in results:
-            lat, lon = float(item['lat']), float(item['lon'])
-            d = haversine(center_lat, center_lon, lat, lon)
-            if d > max_dist_m:
-                continue
-            # Не берём слишком близко к уже выбранным (< 200м)
-            if exclude_coords and any(haversine(lat, lon, e[0], e[1]) < 200
-                                      for e in exclude_coords):
-                continue
-            name = item.get('display_name', '').split(',')[0].strip()
-            if name:
-                candidates.append((d, lat, lon, name))
-
-        if candidates:
-            candidates.sort(key=lambda x: x[0])
-            d, lat, lon, name = candidates[0]
-            print(f"[GEO] nearest '{query}' → {name} ({d/1000:.2f}км)")
-            return lat, lon, name
-
+        if r.text.strip():
+            results = r.json()
+            candidates = []
+            for item in results:
+                lat, lon = float(item['lat']), float(item['lon'])
+                d = haversine(center_lat, center_lon, lat, lon)
+                if d > max_dist_m:
+                    continue
+                if exclude_coords and any(haversine(lat, lon, e[0], e[1]) < 200 for e in exclude_coords):
+                    continue
+                name = item.get('display_name', '').split(',')[0].strip()
+                if name:
+                    candidates.append((d, lat, lon, name))
+            
+            if candidates:
+                candidates.sort(key=lambda x: x[0])
+                d, lat, lon, name = candidates[0]
+                print(f"[GEO] Nominatim nearest '{query}' → {name} ({d/1000:.2f}км)")
+                return lat, lon, name
     except Exception as e:
-        print(f"[GEO] find_nearest_by_category error: {e}")
-
+        print(f"[GEO] Nominatim nearest error: {e}")
+    
     return None
-
 
 def find_nearest_metro(lat, lon):
     """Находит ближайшую станцию метро через Nominatim."""
@@ -468,55 +624,65 @@ def geocode_places(places, city_hint=''):
         time.sleep(1.1)
     return results
 
-def geocode_near_multiple(name, center_lat, center_lon, radius_km=3.0, city_hint='', limit=10):
-    """Возвращает список ближайших мест."""
-    delta = radius_km / 111.0
-    viewbox = (f"{center_lon-delta},{center_lat+delta},"
-               f"{center_lon+delta},{center_lat-delta}")
-
+def geocode_near_multiple(name, center_lat, center_lon, radius_km=5.0, city_hint='', limit=5):
+    """Возвращает список ближайших мест через Яндекс или Nominatim."""
+    time.sleep(0.3)
+    
+    api_key = os.getenv('YANDEX_MAPS_KEY')
     city = city_hint.split(',')[0].strip() if city_hint else ''
     query_with_city = f"{name}, {city}" if city else name
-
     all_results = []
-
-    # Стратегия 1: строгий bbox
-    try:
-        r = requests.get(NOMINATIM, params={
-            'q': query_with_city, 'format': 'json', 'limit': limit,
-            'accept-language': 'ru', 'countrycodes': 'ru',
-            'viewbox': viewbox, 'bounded': 1,
-        }, headers=HEADERS, timeout=10)
-        r.encoding = 'utf-8'
-        if r.text.strip():
+    
+    # Пробуем Яндекс
+    if api_key:
+        try:
+            r = requests.get(YANDEX_SEARCH, params={
+                'apikey': api_key,
+                'text': query_with_city,
+                'lang': 'ru_RU',
+                'll': f'{center_lon},{center_lat}',
+                'spn': f'{radius_km/111},{radius_km/111}',
+                'type': 'biz',
+                'results': limit,
+            }, timeout=10)
             data = r.json()
-            for item in data:
-                lat, lon = float(item['lat']), float(item['lon'])
+            for item in data.get('features', []):
+                props = item.get('properties', {})
+                geom = item.get('geometry', {})
+                coords = geom.get('coordinates', [0, 0])
+                name_found = props.get('name', '')
+                if not name_found:
+                    continue
+                lat, lon = float(coords[1]), float(coords[0])
                 d = haversine(center_lat, center_lon, lat, lon)
                 if d <= radius_km * 1000:
                     all_results.append({
-                        'name': item.get('display_name', '').split(',')[0].strip(),
-                        'description': item.get('display_name', '')[:60],
+                        'name': name_found,
+                        'description': props.get('description', props.get('CompanyMetaData', {}).get('address', ''))[:60],
                         'coords': [lat, lon],
                         'distance': d,
                     })
-    except Exception as e:
-        print(f"[GEO] geocode_near_multiple error: {e}")
-
-    # Стратегия 2: без bounded, больше радиус
-    if len(all_results) < 3:
+            print(f"[GEO] Яндекс: {len(all_results)} вариантов для '{name}'")
+        except Exception as e:
+            print(f"[GEO] Яндекс search error: {e}")
+    
+    # Если Яндекс не дал результатов — пробуем Nominatim
+    if len(all_results) < 2:
+        delta = radius_km / 111.0
+        viewbox = (f"{center_lon-delta},{center_lat+delta},"
+                   f"{center_lon+delta},{center_lat-delta}")
         try:
             r = requests.get(NOMINATIM, params={
                 'q': query_with_city, 'format': 'json', 'limit': limit,
                 'accept-language': 'ru', 'countrycodes': 'ru',
-                'viewbox': viewbox,
-            }, headers=HEADERS, timeout=10)
+                'viewbox': viewbox, 'bounded': 1,
+            }, headers=HEADERS, timeout=20)
             r.encoding = 'utf-8'
             if r.text.strip():
-                data = r.json()
-                for item in data:
+                for item in r.json():
                     lat, lon = float(item['lat']), float(item['lon'])
                     d = haversine(center_lat, center_lon, lat, lon)
-                    if d <= radius_km * 1500:
+                    if d <= radius_km * 1000:
                         all_results.append({
                             'name': item.get('display_name', '').split(',')[0].strip(),
                             'description': item.get('display_name', '')[:60],
@@ -524,9 +690,9 @@ def geocode_near_multiple(name, center_lat, center_lon, radius_km=3.0, city_hint
                             'distance': d,
                         })
         except Exception as e:
-            print(f"[GEO] geocode_near_multiple soft error: {e}")
-
-    # Сортируем по расстоянию и убираем дубли
+            print(f"[GEO] Nominatim search error: {e}")
+    
+    # Сортируем и убираем дубли
     all_results.sort(key=lambda x: x['distance'])
     seen = set()
     unique = []
@@ -536,8 +702,38 @@ def geocode_near_multiple(name, center_lat, center_lon, radius_km=3.0, city_hint
             seen.add(key)
             unique.append(r)
     
-    print(f"[GEO] Найдено {len(unique)} вариантов для '{name}' в радиусе {radius_km}км")
+    print(f"[GEO] Найдено {len(unique)} вариантов для '{name}'")
     return unique
+
+OSRM_WALK = 'http://router.project-osrm.org/route/v1/walking/'
+OSRM_BIKE = 'http://router.project-osrm.org/route/v1/cycling/'
+
+def build_route_osrm(points, transport='walk'):
+    """Строит реальный маршрут через OSRM по дорогам и тропинкам."""
+    if len(points) < 2:
+        return None
+    
+    base_url = OSRM_BIKE if transport == 'bike' else OSRM_WALK
+    coords = ';'.join(f"{p['lon']},{p['lat']}" for p in points)
+    
+    try:
+        r = requests.get(f"{base_url}{coords}", params={
+            'overview': 'full',
+            'geometries': 'geojson',
+            'steps': 'false',
+        }, timeout=15)
+        data = r.json()
+        if data.get('code') == 'Ok':
+            route = data['routes'][0]
+            print(f"[OSRM] Маршрут построен: {route['distance']/1000:.2f}км, {route['duration']/60:.0f}мин")
+            return {
+                'geometry': route['geometry'],
+                'distance': route['distance'],
+                'duration': route['duration'],
+            }
+    except Exception as e:
+        print(f"[OSRM] Error: {e}")
+    return None
 
 @geo_bp.post('/geocode')
 def geocode_endpoint():
