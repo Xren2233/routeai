@@ -7,7 +7,6 @@ from database import db, User
 auth_bp = Blueprint('auth', __name__)
 
 
-# ── Декоратор валидации JSON ──────────────────────────────────────────────
 def require_json(*fields):
     """Декоратор: проверяет наличие обязательных полей в JSON теле запроса."""
     def decorator(f):
@@ -24,16 +23,21 @@ def require_json(*fields):
     return decorator
 
 
-def hash_password(password):
-    salt = os.getenv('JWT_SECRET', 'salt')
-    return hashlib.sha256(f"{salt}{password}".encode()).hexdigest()
+import bcrypt
 
+def hash_password(password):
+    """Хеширует пароль через bcrypt."""
+    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+def check_password(password, hashed):
+    """Проверяет пароль."""
+    return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
 
 def validate_email(email):
     return re.match(r'^[^@]+@[^@]+\.[^@]+$', email) is not None
 
 
-# ── Эндпоинты ─────────────────────────────────────────────────────────────
+# Эндпоинты 
 
 @auth_bp.post('/register')
 @require_json('name', 'email', 'password')
@@ -69,7 +73,7 @@ def login():
     password = data['password']
 
     user = User.query.filter_by(email=email).first()
-    if not user or user.password_hash != hash_password(password):
+    if not user or not check_password(password, user.password_hash):
         return jsonify(error='Неверная почта или пароль'), 401
 
     token = create_access_token(identity=str(user.id))
