@@ -45,7 +45,7 @@
     <nav class="navbar">
       <div class="nav-links">
         <button class="nav-btn active" onclick="showPage('home')">Главная</button>
-        <button class="nav-btn" onclick="showPage('account')">Профиль</button>
+        <button class="nav-btn" onclick="showPage('account')">Аккаунт</button>
         <button class="nav-btn btn-create" onclick="showPage('survey')">Создать маршрут</button>
       </div>
     </nav>
@@ -117,10 +117,9 @@
       </div>
     </div>
 
-    <!-- Страница аккаунта -->
+        <!-- Страница аккаунта -->
     <div id="page-account" class="page">
       <div class="account-container">
-        <!-- Аватар (просто показываем, не кликабельный) -->
         <div class="account-avatar">
           <img id="avatar-img" src="" alt="Аватар" style="display:none;width:100%;height:100%;border-radius:50%;object-fit:cover;" />
           <span id="avatar-placeholder">👤</span>
@@ -137,16 +136,14 @@
         <div id="edit-profile-form" class="hidden" style="margin-bottom:24px;">
           <div class="edit-profile-card">
             <h4>Изменить данные</h4>
-
             <!-- Аватар в форме -->
             <div style="text-align:center;margin-bottom:16px;">
               <div class="edit-avatar" onclick="document.getElementById('avatar-input').click()">
                 <img id="edit-avatar-img" src="" alt="Аватар" style="display:none;width:100%;height:100%;border-radius:50%;object-fit:cover;" />
                 <span id="edit-avatar-placeholder">📷</span>
-                <div class="avatar-overlay">Сменить</div>
               </div>
               <input type="file" id="avatar-input" accept="image/*" onchange="uploadAvatar(event)" style="display:none;" />
-              <button class="btn-sm" onclick="removeAvatar()" style="margin-top:8px;font-size:0.8rem;background:transparent;border:1px solid var(--border);color:var(--text-muted);border-radius:6px;padding:4px 16px;cursor:pointer;">
+              <button type="button" class="btn-sm" onclick="removeAvatar()" style="margin-top:8px;font-size:0.8rem;background:transparent;border:1px solid var(--border);color:var(--text-muted);border-radius:6px;padding:4px 16px;cursor:pointer;">
                 Удалить фото
               </button>
             </div>
@@ -161,6 +158,10 @@
               <button class="btn-secondary" onclick="hideEditProfile()" style="flex:1;">Отмена</button>
             </div>
           </div>
+        </div>
+
+        <div class="account-stats">
+          <div class="stat"><span id="routes-count">0</span><p>Маршрутов</p></div>
         </div>
 
         <!-- ВЫБОР ТЕМЫ ОФОРМЛЕНИЯ -->
@@ -194,7 +195,7 @@
 
         <!-- Кнопки удаления и выхода в один ряд -->
         <div style="display:flex;gap:10px;margin-top:24px;">
-          <button class="btn-danger" onclick="deleteAccount()" style="flex:1;"> Удалить аккаунт</button>
+          <button class="btn-danger" onclick="deleteAccount()" style="flex:1;">⚠️ Удалить аккаунт</button>
           <button class="btn-secondary" onclick="logout()" style="flex:1;">Выйти</button>
         </div>
       </div>
@@ -257,6 +258,29 @@
     </div>
 
   </div>
+
+        <!-- Модальное окно редактирования маршрута -->
+        <div id="edit-route-modal" class="overlay hidden" style="z-index:1001;">
+          <div class="modal" style="max-width:500px;">
+            <h3>Редактировать маршрут</h3>
+            
+            <label class="field-label">Название</label>
+            <input type="text" id="edit-route-title" class="survey-input" placeholder="Название маршрута" />
+            
+            <label class="field-label" style="margin-top:12px;">Заметка</label>
+            <textarea id="edit-route-note" class="survey-input" placeholder="Опишите маршрут: с кем были, что понравилось..." style="min-height:100px;resize:vertical;"></textarea>
+            
+            <label class="field-label" style="margin-top:12px;">Фотографии</label>
+            <input type="file" id="edit-route-photos" accept="image/*" multiple style="margin-bottom:8px;" />
+            <div id="edit-route-photos-preview" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
+            
+            <p class="error-msg" id="edit-route-error"></p>
+            <div style="display:flex;gap:10px;margin-top:16px;">
+              <button class="btn-primary" onclick="saveRouteEdit()" style="flex:1;">Сохранить</button>
+              <button class="btn-secondary" onclick="closeEditRouteModal()" style="flex:1;">Отмена</button>
+            </div>
+          </div>
+        </div>
 
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <script src="js/auth.js"></script>
